@@ -5,12 +5,12 @@
 ═══════════════════════════════════════════════════ */
 
 const API_CONFIG = {
-    PORT: 3000,
+    // ⚠️ RENDER'DAN OLGAN YANGİ MANZİLİNGİZ:
+    PRODUCTION_URL: 'https://everestcontrol.onrender.com', 
+    
     get BASE_URL() {
-        const origin = window.location.origin || '';
-        return (typeof origin === 'string' && origin.includes('localhost:3000')) 
-            ? '' 
-            : 'http://localhost:3000';
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        return isLocal ? 'http://localhost:3000' : this.PRODUCTION_URL;
     }
 };
 
