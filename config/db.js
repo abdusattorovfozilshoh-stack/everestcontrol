@@ -1,10 +1,18 @@
-const Database = require('better-sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 const dbPath = path.join(__dirname, '..', 'db.sqlite');
-const db = new Database(dbPath);
-
-db.pragma('foreign_keys = ON');
+const db = new sqlite3.Database(dbPath, (err) => {
+    if (err) {
+        console.error('Baza ulanishida xatolik:', err.message);
+    } else {
+        console.log('SQLite bazasiga ulandi.');
+        db.run('PRAGMA foreign_keys = ON;', (err) => {
+            if (err) console.error('Foreign Key yoqishda xatolik:', err.message);
+        });
+        initDB();
+    }
+});
 
 const DEFAULT_TEACHERS = [
     { ism: 'Aziza', fam: 'Karimova', tel: '+998901234567', login: 'aziza', pass: 'aziza123' },
@@ -59,34 +67,34 @@ const DEFAULT_PAYMENTS = [
 ];
 
 function initDB() {
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS teachers (
+    db.serialize(() => {
+        db.run(`CREATE TABLE IF NOT EXISTS teachers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ism TEXT, fam TEXT, tel TEXT, login TEXT, pass TEXT
-        );
+        )`);
 
-        CREATE TABLE IF NOT EXISTS groups (
+        db.run(`CREATE TABLE IF NOT EXISTS groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             teacherId INTEGER, level TEXT, suffix TEXT, name TEXT, fee INTEGER,
             ts TEXT, te TEXT, days TEXT, students TEXT,
             FOREIGN KEY(teacherId) REFERENCES teachers(id)
-        );
+        )`);
 
-        CREATE TABLE IF NOT EXISTS payments (
+        db.run(`CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             studentName TEXT, groupId INTEGER, month TEXT, amount INTEGER, date TEXT,
             paid INTEGER DEFAULT 0,
             FOREIGN KEY(groupId) REFERENCES groups(id)
-        );
+        )`);
 
-        CREATE TABLE IF NOT EXISTS settings (
+        db.run(`CREATE TABLE IF NOT EXISTS settings (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             adminLogin TEXT, adminPass TEXT, centerName TEXT, centerAddr TEXT,
             centerPhone TEXT, centerEmail TEXT, groupCapacity INTEGER, courses TEXT
-        );
-    `);
-
-    initDefaultData();
+        )`, (err) => {
+            if (!err) initDefaultData();
+        });
+    });
 }
 
 function initDefaultData() {
@@ -98,38 +106,45 @@ function initDefaultData() {
         { key: 'Graduation', fee: 700000 }
     ]);
 
-    const settingsRow = db.prepare('SELECT id FROM settings WHERE id = 1').get();
-    if (!settingsRow) {
-        db.prepare(`INSERT INTO settings (id, adminLogin, adminPass, centerName, centerAddr, centerPhone, centerEmail, groupCapacity, courses)
-                    VALUES (1, 'admin', 'admin123', 'Everest O''quv Markazi', 'Toshkent sh., Chilonzor t.', '+998 90 123 45 67', 'info@everest.uz', 15, ?)`)
-            .run(defaultCourses);
-    }
-
-    const teacherCount = db.prepare('SELECT COUNT(*) AS count FROM teachers').get();
-    if (teacherCount.count === 0) {
-        const teacherStmt = db.prepare('INSERT OR IGNORE INTO teachers (id, ism, fam, tel, login, pass) VALUES (?, ?, ?, ?, ?, ?)');
-        DEFAULT_TEACHERS.forEach((teacher, index) => {
-            teacherStmt.run(index + 1, teacher.ism, teacher.fam, teacher.tel, teacher.login, teacher.pass);
+    db.serialize(() => {
+        db.get('SELECT id FROM settings WHERE id = 1', [], (err, row) => {
+            if (!err && !row) {
+                db.run(`INSERT INTO settings (id, adminLogin, adminPass, centerName, centerAddr, centerPhone, centerEmail, groupCapacity, courses) 
+                        VALUES (1, 'admin', 'admin123', 'Everest O''quv Markazi', 'Toshkent sh., Chilonzor t.', '+998 90 123 45 67', 'info@everest.uz', 15, ?)`,
+                [defaultCourses]);
+            }
         });
-    }
 
-    const groupCount = db.prepare('SELECT COUNT(*) AS count FROM groups').get();
-    if (groupCount.count === 0) {
-        const groupStmt = db.prepare('INSERT OR IGNORE INTO groups (id, teacherId, level, suffix, name, fee, ts, te, days, students) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        DEFAULT_GROUPS.forEach((group, index) => {
-            groupStmt.run(index + 1, group.teacherId, group.level, group.suffix, group.name, group.fee, group.ts, group.te, JSON.stringify(group.days), JSON.stringify(group.students));
+        db.get('SELECT COUNT(*) AS count FROM teachers', [], (err, row) => {
+            if (!err && row && row.count === 0) {
+                const teacherStmt = db.prepare('INSERT OR IGNORE INTO teachers (id, ism, fam, tel, login, pass) VALUES (?, ?, ?, ?, ?, ?)');
+                DEFAULT_TEACHERS.forEach((teacher, index) => {
+                    teacherStmt.run(index + 1, teacher.ism, teacher.fam, teacher.tel, teacher.login, teacher.pass);
+                });
+                teacherStmt.finalize();
+            }
         });
-    }
 
-    const paymentCount = db.prepare('SELECT COUNT(*) AS count FROM payments').get();
-    if (paymentCount.count === 0) {
-        const paymentStmt = db.prepare('INSERT OR IGNORE INTO payments (id, studentName, groupId, month, amount, date, paid) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        DEFAULT_PAYMENTS.forEach((payment, index) => {
-            paymentStmt.run(index + 1, payment.studentName, payment.groupId, payment.month, payment.amount, payment.date, payment.paid);
+        db.get('SELECT COUNT(*) AS count FROM groups', [], (err, row) => {
+            if (!err && row && row.count === 0) {
+                const groupStmt = db.prepare('INSERT OR IGNORE INTO groups (id, teacherId, level, suffix, name, fee, ts, te, days, students) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                DEFAULT_GROUPS.forEach((group, index) => {
+                    groupStmt.run(index + 1, group.teacherId, group.level, group.suffix, group.name, group.fee, group.ts, group.te, JSON.stringify(group.days), JSON.stringify(group.students));
+                });
+                groupStmt.finalize();
+            }
         });
-    }
+
+        db.get('SELECT COUNT(*) AS count FROM payments', [], (err, row) => {
+            if (!err && row && row.count === 0) {
+                const paymentStmt = db.prepare('INSERT OR IGNORE INTO payments (id, studentName, groupId, month, amount, date, paid) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                DEFAULT_PAYMENTS.forEach((payment, index) => {
+                    paymentStmt.run(index + 1, payment.studentName, payment.groupId, payment.month, payment.amount, payment.date, payment.paid);
+                });
+                paymentStmt.finalize();
+            }
+        });
+    });
 }
-
-initDB();
 
 module.exports = db;
